@@ -3,6 +3,7 @@
 set -euo pipefail
 export DEBIAN_FRONTEND=noninteractive
 TOOL_ID="${1:-}"
+UPDATE_MODE="${2:-}"
 
 install_rpi_gpio() {
   echo "[iot] Installing RPi.GPIO + gpiozero..."
@@ -67,6 +68,12 @@ install_mosquitto() {
 }
 
 install_node_red() {
+  if [ "$UPDATE_MODE" = "update" ]; then
+    echo "[iot] Updating Node-RED..."
+    npm update -g node-red 2>/dev/null || true
+    echo "[iot] Node-RED updated."
+    return
+  fi
   echo "[iot] Installing Node-RED..."
   apt-get install -y --no-install-recommends nodejs npm
   npm install -g --unsafe-perm node-red 2>/dev/null || true
@@ -92,6 +99,13 @@ EOF
 }
 
 install_zigbee2mqtt() {
+  if [ "$UPDATE_MODE" = "update" ] && [ -d /opt/zigbee2mqtt ]; then
+    echo "[iot] Updating zigbee2mqtt..."
+    git -C /opt/zigbee2mqtt pull 2>/dev/null || true
+    cd /opt/zigbee2mqtt && npm ci --production 2>/dev/null || true
+    echo "[iot] zigbee2mqtt updated."
+    return
+  fi
   echo "[iot] Installing zigbee2mqtt..."
   apt-get install -y --no-install-recommends nodejs npm git
   mkdir -p /opt/zigbee2mqtt

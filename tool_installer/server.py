@@ -145,7 +145,16 @@ def connect_ssh(host: str, user: str, port: int, password: Optional[str], key_fi
     ssh_client = client
     log.info(f"SSH connected to {user}@{host}:{port}")
 
-# ── Install Logic ─────────────────────────────────────────────────────────────
+# ── Install / Update Logic ────────────────────────────────────────────────────
+
+def _script_cmd(script: str, tool_id: str, mode_arg: str = "") -> str:
+    """Build the shell command for a given install script, tool, and mode."""
+    script_path = f"/usr/local/P4wnP1/tool_installer/install_scripts/{script}"
+    local_path = str(SCRIPTS_DIR / script)
+    suffix = f" {tool_id}" + (f" {mode_arg}" if mode_arg else "")
+    if config.get("mode") == "local":
+        return f"bash {local_path}{suffix}"
+    return f"bash {script_path}{suffix}"
 
 def get_install_cmd(tool: dict) -> str:
     """Returns the shell command to install a tool."""
@@ -161,19 +170,39 @@ def get_install_cmd(tool: dict) -> str:
             return f"apt-get install -y --no-install-recommends {' '.join(pkgs)}"
         return f"echo 'No install method defined for {tool_id}'"
 
-    script_path = f"/usr/local/P4wnP1/tool_installer/install_scripts/{script}"
-    local_path = str(SCRIPTS_DIR / script)
+    return _script_cmd(script, tool_id)
 
-    # If local mode, use local path
-    if config.get("mode") == "local":
-        return f"bash {local_path} {tool_id}"
-    # SSH mode: script must be on the Pi
-    return f"bash {script_path} {tool_id}"
+def get_update_cmd(tool: dict) -> str:
+    """Returns the shell command to update an already-installed tool."""
+    tool_id = tool["id"]
 
-async def run_install_job(job_id: str, tool_ids: list[str], catalog: dict):
-    """Background task: install selected tools, stream output to job buffer."""
+    if tool.get("builtin"):
+        return "echo 'Built-in — managed by the P4wnP1 service; no update needed.'"
+
+    # Catalog-provided explicit update command takes priority
+    explicit = tool.get("update_cmd", "")
+    if explicit:
+        return explicit
+
+    script = tool.get("install_script", "")
+    if script:
+        # Pass "update" as the second argument; scripts handle git pull / pip upgrade
+        return _script_cmd(script, tool_id, "update")
+
+    # apt packages: refresh lists then upgrade only the named packages
+    pkgs = tool.get("packages", [])
+    if pkgs:
+        pkg_list = " ".join(pkgs)
+        return (f"apt-get update -qq && "
+                f"apt-get install -y --only-upgrade --no-install-recommends {pkg_list}")
+
+    return f"echo 'No update method defined for {tool_id}'"
+
+async def _run_job(job_id: str, tool_ids: list[str], catalog: dict, action: str):
+    """Background task: run install or update for each tool, stream output."""
     tools_map = flat_tools(catalog)
     jobs[job_id]["status"] = "running"
+    verb = "Updating" if action == "update" else "Installing"
 
     for tool_id in tool_ids:
         tool = tools_map.get(tool_id)
@@ -182,10 +211,10 @@ async def run_install_job(job_id: str, tool_ids: list[str], catalog: dict):
             continue
 
         jobs[job_id]["output"].append(f"\n{'='*60}\n")
-        jobs[job_id]["output"].append(f"Installing: {tool['name']}\n")
+        jobs[job_id]["output"].append(f"{verb}: {tool['name']}\n")
         jobs[job_id]["output"].append(f"{'='*60}\n")
 
-        cmd = get_install_cmd(tool)
+        cmd = get_update_cmd(tool) if action == "update" else get_install_cmd(tool)
         jobs[job_id]["output"].append(f"$ {cmd}\n\n")
 
         try:
@@ -194,12 +223,22 @@ async def run_install_job(job_id: str, tool_ids: list[str], catalog: dict):
         except Exception as e:
             jobs[job_id]["output"].append(f"[ERROR] {e}\n")
 
-    jobs[job_id]["output"].append("\n[DONE] Installation complete.\n")
+    done_msg = "Update" if action == "update" else "Installation"
+    jobs[job_id]["output"].append(f"\n[DONE] {done_msg} complete.\n")
     jobs[job_id]["status"] = "done"
+
+async def run_install_job(job_id: str, tool_ids: list[str], catalog: dict):
+    await _run_job(job_id, tool_ids, catalog, "install")
+
+async def run_update_job(job_id: str, tool_ids: list[str], catalog: dict):
+    await _run_job(job_id, tool_ids, catalog, "update")
 
 # ── API Models ────────────────────────────────────────────────────────────────
 
 class InstallRequest(BaseModel):
+    tool_ids: list[str]
+
+class UpdateRequest(BaseModel):
     tool_ids: list[str]
 
 class SSHConnectRequest(BaseModel):
@@ -249,12 +288,44 @@ async def install_tools(req: InstallRequest):
         raise HTTPException(status_code=400, detail="No tool_ids provided")
     job_id = str(uuid.uuid4())
     catalog = load_catalog()
-    jobs[job_id] = {"status": "pending", "output": [], "tool_ids": req.tool_ids}
-    # Run in background thread (blocking I/O)
+    jobs[job_id] = {"status": "pending", "output": [], "tool_ids": req.tool_ids,
+                    "action": "install"}
     asyncio.get_event_loop().run_in_executor(
         None, lambda: asyncio.run(run_install_job(job_id, req.tool_ids, catalog))
     )
     return {"job_id": job_id}
+
+@app.post("/api/update")
+async def update_tools(req: UpdateRequest):
+    if not req.tool_ids:
+        raise HTTPException(status_code=400, detail="No tool_ids provided")
+    job_id = str(uuid.uuid4())
+    catalog = load_catalog()
+    jobs[job_id] = {"status": "pending", "output": [], "tool_ids": req.tool_ids,
+                    "action": "update"}
+    asyncio.get_event_loop().run_in_executor(
+        None, lambda: asyncio.run(run_update_job(job_id, req.tool_ids, catalog))
+    )
+    return {"job_id": job_id}
+
+@app.post("/api/update-all")
+async def update_all_installed():
+    """Update every currently-installed tool in one job."""
+    catalog = load_catalog()
+    tools_map = flat_tools(catalog)
+    installed_ids = [
+        tid for tid, tool in tools_map.items()
+        if not tool.get("builtin") and check_tool_installed_fast(tool)
+    ]
+    if not installed_ids:
+        raise HTTPException(status_code=400, detail="No installed tools found")
+    job_id = str(uuid.uuid4())
+    jobs[job_id] = {"status": "pending", "output": [], "tool_ids": installed_ids,
+                    "action": "update"}
+    asyncio.get_event_loop().run_in_executor(
+        None, lambda: asyncio.run(run_update_job(job_id, installed_ids, catalog))
+    )
+    return {"job_id": job_id, "tool_ids": installed_ids}
 
 @app.get("/api/jobs/{job_id}/stream")
 async def stream_job(job_id: str):
@@ -284,7 +355,8 @@ async def get_job(job_id: str):
         raise HTTPException(status_code=404, detail="Job not found")
     j = jobs[job_id]
     return {"job_id": job_id, "status": j["status"],
-            "output": "".join(j["output"]), "tool_ids": j["tool_ids"]}
+            "output": "".join(j["output"]), "tool_ids": j["tool_ids"],
+            "action": j.get("action", "install")}
 
 @app.get("/api/system")
 async def get_system():

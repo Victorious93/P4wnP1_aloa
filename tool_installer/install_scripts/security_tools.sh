@@ -3,6 +3,7 @@
 set -euo pipefail
 export DEBIAN_FRONTEND=noninteractive
 TOOL_ID="${1:-}"
+UPDATE_MODE="${2:-}"   # "update" when called from /api/update
 
 install_nmap() {
   echo "[sec] Installing nmap..."
@@ -47,12 +48,17 @@ install_hashcat() {
 }
 
 install_metasploit() {
-  echo "[sec] Installing Metasploit Framework..."
-  echo "[sec] WARNING: Metasploit requires ~1.5GB disk space."
-  if which msfconsole >/dev/null 2>&1; then
-    echo "[sec] Metasploit already installed."
+  if [ "$UPDATE_MODE" = "update" ] && [ -d /opt/metasploit-framework ]; then
+    echo "[sec] Updating Metasploit Framework..."
+    git -C /opt/metasploit-framework pull --ff-only 2>/dev/null || \
+      git -C /opt/metasploit-framework pull
+    cd /opt/metasploit-framework
+    bundle install --without development test 2>/dev/null || true
+    echo "[sec] Metasploit updated."
     return
   fi
+  echo "[sec] Installing Metasploit Framework..."
+  echo "[sec] WARNING: Metasploit requires ~1.5GB disk space."
   apt-get install -y --no-install-recommends ruby ruby-dev libpcap-dev libpq-dev \
     postgresql postgresql-client build-essential
   gem install bundler --no-document 2>/dev/null || true
@@ -66,10 +72,9 @@ install_metasploit() {
 }
 
 install_impacket() {
-  echo "[sec] Installing impacket..."
-  apt-get install -y --no-install-recommends python3-impacket 2>/dev/null || \
-    pip3 install impacket
-  echo "[sec] impacket installed."
+  echo "[sec] ${UPDATE_MODE:+Updat}${UPDATE_MODE:-Install}ing impacket..."
+  pip3 install ${UPDATE_MODE:+--upgrade} impacket
+  echo "[sec] impacket ${UPDATE_MODE:-install}ed."
 }
 
 install_netcat() {
@@ -85,6 +90,13 @@ install_socat() {
 }
 
 install_exploitdb() {
+  if [ "$UPDATE_MODE" = "update" ] && [ -d /usr/share/exploitdb ]; then
+    echo "[sec] Updating ExploitDB database..."
+    git -C /usr/share/exploitdb pull 2>/dev/null || \
+      apt-get install -y --only-upgrade exploitdb 2>/dev/null || true
+    echo "[sec] ExploitDB updated."
+    return
+  fi
   echo "[sec] Installing ExploitDB (searchsploit)..."
   apt-get install -y --no-install-recommends exploitdb 2>/dev/null || \
     pip3 install searchsploit 2>/dev/null || true
@@ -99,12 +111,18 @@ install_enum4linux() {
 }
 
 install_wordlists() {
+  if [ "$UPDATE_MODE" = "update" ]; then
+    echo "[sec] Updating wordlists..."
+    apt-get update -qq && apt-get install -y --only-upgrade wordlists 2>/dev/null || true
+    [ -d /usr/share/seclists ] && git -C /usr/share/seclists pull 2>/dev/null || true
+    echo "[sec] Wordlists updated."
+    return
+  fi
   echo "[sec] Installing wordlists..."
   apt-get install -y --no-install-recommends wordlists 2>/dev/null || true
   if [ -f /usr/share/wordlists/rockyou.txt.gz ]; then
     gunzip -k /usr/share/wordlists/rockyou.txt.gz 2>/dev/null || true
   fi
-  # Download SecLists subset if not present
   if [ ! -d /usr/share/seclists ]; then
     mkdir -p /usr/share/seclists
     git clone --depth=1 --filter=blob:none --sparse \

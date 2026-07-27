@@ -3,6 +3,7 @@
 set -euo pipefail
 export DEBIAN_FRONTEND=noninteractive
 TOOL_ID="${1:-}"
+UPDATE_MODE="${2:-}"
 
 install_dnsmasq() {
   echo "[net] Installing dnsmasq..."
@@ -70,15 +71,20 @@ install_sslsplit() {
 }
 
 install_responder() {
-  echo "[net] Installing Responder..."
-  if ! which responder >/dev/null 2>&1; then
-    apt-get install -y --no-install-recommends python3 python3-pip git
-    pip3 install --quiet ldap3 cryptography
-    cd /opt
-    git clone --depth=1 https://github.com/lgandx/Responder.git 2>/dev/null || true
-    ln -sf /opt/Responder/Responder.py /usr/local/bin/responder
-    chmod +x /usr/local/bin/responder
+  if [ "$UPDATE_MODE" = "update" ] && [ -d /opt/Responder ]; then
+    echo "[net] Updating Responder..."
+    git -C /opt/Responder pull 2>/dev/null || true
+    pip3 install --upgrade --quiet ldap3 cryptography
+    echo "[net] Responder updated."
+    return
   fi
+  echo "[net] Installing Responder..."
+  apt-get install -y --no-install-recommends python3 python3-pip git
+  pip3 install --quiet ldap3 cryptography
+  cd /opt
+  git clone --depth=1 https://github.com/lgandx/Responder.git 2>/dev/null || true
+  ln -sf /opt/Responder/Responder.py /usr/local/bin/responder
+  chmod +x /usr/local/bin/responder
   echo "[net] Responder installed at /opt/Responder/"
 }
 

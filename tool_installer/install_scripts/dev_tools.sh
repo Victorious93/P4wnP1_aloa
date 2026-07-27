@@ -3,6 +3,7 @@
 set -euo pipefail
 export DEBIAN_FRONTEND=noninteractive
 TOOL_ID="${1:-}"
+UPDATE_MODE="${2:-}"
 
 install_python3_dev() {
   echo "[dev] Installing Python 3 dev stack..."
@@ -189,6 +190,13 @@ install_openssh() {
 }
 
 install_homeassistant() {
+  if [ "$UPDATE_MODE" = "update" ]; then
+    echo "[ha] Updating Home Assistant..."
+    pip3 install --upgrade homeassistant 2>/dev/null || true
+    systemctl restart homeassistant 2>/dev/null || true
+    echo "[ha] Home Assistant updated."
+    return
+  fi
   echo "[ha] Installing Home Assistant..."
   pip3 install --quiet homeassistant 2>/dev/null || true
   cat > /etc/systemd/system/homeassistant.service << 'EOF'
