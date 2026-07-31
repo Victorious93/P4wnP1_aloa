@@ -4,9 +4,22 @@ on:
   push:
     tags:
       - "v*"
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Release tag name (e.g. v1.0.0)"
+        required: true
+        default: "v1.0.0"
+      target:
+        description: "Target commit SHA (leave blank for current HEAD)"
+        required: false
+        default: ""
 
 permissions:
   contents: write
+
+env:
+  REL_TAG: ${{ inputs.tag || github.ref_name }}
 
 jobs:
   build-linux:
@@ -17,6 +30,8 @@ jobs:
       appimage: ${{ steps.paths.outputs.appimage }}
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.target || github.sha }}
 
       - uses: actions/setup-python@v5
         with:
@@ -34,6 +49,7 @@ jobs:
         id: paths
         working-directory: tool_installer
         run: |
+          TAG="${{ env.REL_TAG }}"
           mkdir -p AppDir/usr/bin AppDir/usr/share/applications AppDir/usr/share/icons/hicolor/256x256/apps
           cp dist/P4wnP1_Installer AppDir/usr/bin/
 
@@ -54,10 +70,10 @@ jobs:
 
           wget -q "https://github.com/AppImage/AppImageKit/releases/download/continuous/appimagetool-x86_64.AppImage" \
             -O appimagetool && chmod +x appimagetool
-          ARCH=x86_64 ./appimagetool AppDir "dist/P4wnP1_Installer-${{ github.ref_name }}-x86_64.AppImage" || true
+          ARCH=x86_64 ./appimagetool AppDir "dist/P4wnP1_Installer-${TAG}-x86_64.AppImage" || true
 
           echo "binary=tool_installer/dist/P4wnP1_Installer" >> "$GITHUB_OUTPUT"
-          echo "appimage=tool_installer/dist/P4wnP1_Installer-${{ github.ref_name }}-x86_64.AppImage" >> "$GITHUB_OUTPUT"
+          echo "appimage=tool_installer/dist/P4wnP1_Installer-${TAG}-x86_64.AppImage" >> "$GITHUB_OUTPUT"
 
       - uses: actions/upload-artifact@v4
         with:
@@ -72,6 +88,8 @@ jobs:
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.target || github.sha }}
 
       - uses: actions/setup-python@v5
         with:
@@ -124,7 +142,7 @@ jobs:
 
       - name: Rename assets with version tag
         run: |
-          TAG="${{ github.ref_name }}"
+          TAG="${{ env.REL_TAG }}"
           cd release-assets
           find . -type f | sort
 
@@ -141,9 +159,11 @@ jobs:
       - name: Create release and upload assets
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TARGET: ${{ inputs.target || github.sha }}
         run: |
-          TAG="${{ github.ref_name }}"
+          TAG="${{ env.REL_TAG }}"
           gh release create "$TAG" \
+            --target "$TARGET" \
             --title "BakerPi Tool Installer $TAG" \
             --notes "## Downloads
 
@@ -173,6 +193,7 @@ jobs:
             release-assets/windows/P4wnP1_Installer_Setup-${TAG}.exe \
             2>/dev/null || \
           gh release create "$TAG" \
+            --target "$TARGET" \
             --title "BakerPi Tool Installer $TAG" \
             --notes "BakerPi Tool Installer $TAG" \
             $(find release-assets -type f | sort | xargs)
