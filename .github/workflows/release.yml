@@ -1,0 +1,178 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  build-linux:
+    name: Linux AppImage
+    runs-on: ubuntu-22.04
+    outputs:
+      binary: ${{ steps.paths.outputs.binary }}
+      appimage: ${{ steps.paths.outputs.appimage }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Install dependencies
+        run: pip install pyinstaller fastapi uvicorn paramiko cryptography aiohttp
+
+      - name: Build binary
+        working-directory: tool_installer
+        run: pyinstaller p4wnp1_installer.spec --noconfirm
+
+      - name: Package as AppImage
+        id: paths
+        working-directory: tool_installer
+        run: |
+          mkdir -p AppDir/usr/bin AppDir/usr/share/applications AppDir/usr/share/icons/hicolor/256x256/apps
+          cp dist/P4wnP1_Installer AppDir/usr/bin/
+
+          cat > AppDir/p4wnp1-installer.desktop << 'EOF'
+          [Desktop Entry]
+          Name=P4wnP1 Tool Installer
+          Exec=P4wnP1_Installer
+          Icon=p4wnp1-installer
+          Type=Application
+          Categories=Network;Security;System;
+          EOF
+          cp AppDir/p4wnp1-installer.desktop AppDir/usr/share/applications/
+
+          # Minimal 1x1 placeholder icon
+          printf '\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR\x00\x00\x00\x01\x00\x00\x00\x01\x08\x02\x00\x00\x00\x90wS\xde\x00\x00\x00\x0cIDATx\x9cc\xf8\x0f\x00\x00\x01\x01\x00\x05\x18\xd8N\x00\x00\x00\x00IEND\xaeB`\x82' \
+            > AppDir/p4wnp1-installer.png
+          cp AppDir/p4wnp1-installer.png AppDir/usr/share/icons/hicolor/256x256/apps/
+
+          wget -q "https://github.com/AppImage/AppImageKit/releases/download/continuous/appimagetool-x86_64.AppImage" \
+            -O appimagetool && chmod +x appimagetool
+          ARCH=x86_64 ./appimagetool AppDir "dist/P4wnP1_Installer-${{ github.ref_name }}-x86_64.AppImage" || true
+
+          echo "binary=tool_installer/dist/P4wnP1_Installer" >> "$GITHUB_OUTPUT"
+          echo "appimage=tool_installer/dist/P4wnP1_Installer-${{ github.ref_name }}-x86_64.AppImage" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: linux-build
+          path: |
+            tool_installer/dist/P4wnP1_Installer
+            tool_installer/dist/P4wnP1_Installer-*-x86_64.AppImage
+          retention-days: 1
+
+  build-windows:
+    name: Windows Installer
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Install dependencies
+        run: pip install pyinstaller fastapi uvicorn paramiko cryptography aiohttp
+
+      - name: Build EXE
+        working-directory: tool_installer
+        run: pyinstaller p4wnp1_installer.spec --noconfirm
+
+      - name: Install Inno Setup and build installer
+        working-directory: tool_installer
+        shell: pwsh
+        run: |
+          $iscc = "C:\Program Files (x86)\Inno Setup 6\ISCC.exe"
+          if (-not (Test-Path $iscc)) {
+            $tmp = "$env:TEMP\is.exe"
+            Invoke-WebRequest -Uri "https://jrsoftware.org/download.php/is.exe" -OutFile $tmp
+            Start-Process -Wait -FilePath $tmp -ArgumentList "/VERYSILENT /SUPPRESSMSGBOXES /NORESTART"
+          }
+          & $iscc installer.iss
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: windows-build
+          path: |
+            tool_installer/dist/P4wnP1_Installer.exe
+            tool_installer/dist/installer/P4wnP1_Installer_Setup.exe
+          retention-days: 1
+
+  release:
+    name: Create GitHub Release
+    needs: [build-linux, build-windows]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: linux-build
+          path: release-assets/linux
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: windows-build
+          path: release-assets/windows
+
+      - name: Rename assets with version tag
+        run: |
+          TAG="${{ github.ref_name }}"
+          cd release-assets
+          find . -type f | sort
+
+          # Linux
+          [ -f linux/P4wnP1_Installer ] && \
+            mv linux/P4wnP1_Installer "linux/P4wnP1_Installer-${TAG}-linux-x86_64"
+
+          # Windows
+          [ -f windows/P4wnP1_Installer.exe ] && \
+            mv windows/P4wnP1_Installer.exe "windows/P4wnP1_Installer-${TAG}-windows.exe"
+          [ -f windows/P4wnP1_Installer_Setup.exe ] && \
+            mv windows/P4wnP1_Installer_Setup.exe "windows/P4wnP1_Installer_Setup-${TAG}.exe"
+
+      - name: Create release and upload assets
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          TAG="${{ github.ref_name }}"
+          gh release create "$TAG" \
+            --title "BakerPi Tool Installer $TAG" \
+            --notes "## Downloads
+
+          | Platform | File | Notes |
+          |---|---|---|
+          | Linux x86-64 | \`P4wnP1_Installer-${TAG}-linux-x86_64\` | Standalone binary, \`chmod +x\` then run |
+          | Linux x86-64 | \`P4wnP1_Installer-${TAG}-x86_64.AppImage\` | AppImage, double-click or run |
+          | Windows | \`P4wnP1_Installer-${TAG}-windows.exe\` | Standalone EXE, no install needed |
+          | Windows | \`P4wnP1_Installer_Setup-${TAG}.exe\` | Installer with Start Menu + uninstaller |
+
+          ## Usage
+
+          **PC mode (SSH to Pi Zero over USB):**
+          Run the installer on your laptop — it connects to the Pi Zero at \`172.16.0.1\` via SSH.
+
+          **On-device mode (Android / any browser):**
+          Copy the binary to the Pi Zero and run \`./P4wnP1_Installer --mode local --no-browser\`.
+          Then open \`http://172.16.0.1:8080\` in your phone browser.
+
+          ## Requirements
+          - Pi Zero 1.3 running Raspberry Pi OS Lite
+          - USB OTG cable connected to the Pi Zero's data port
+          - Pi Zero accessible at \`172.16.0.1\` (USB RNDIS/CDC-ECM)" \
+            release-assets/linux/P4wnP1_Installer-${TAG}-linux-x86_64 \
+            release-assets/linux/P4wnP1_Installer-${TAG}-x86_64.AppImage \
+            release-assets/windows/P4wnP1_Installer-${TAG}-windows.exe \
+            release-assets/windows/P4wnP1_Installer_Setup-${TAG}.exe \
+            2>/dev/null || \
+          gh release create "$TAG" \
+            --title "BakerPi Tool Installer $TAG" \
+            --notes "BakerPi Tool Installer $TAG" \
+            $(find release-assets -type f | sort | xargs)
