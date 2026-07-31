@@ -180,6 +180,7 @@
           "check_cmd": "which responder",
           "check_pkg": "",
           "install_script": "network_tools.sh",
+          "uninstall_cmd": "rm -rf /opt/Responder && rm -f /usr/local/bin/responder",
           "builtin": false,
           "tags": ["llmnr", "nbns", "credential", "windows"],
           "requires_reboot": false
@@ -308,6 +309,7 @@
           "check_cmd": "which msfconsole",
           "check_pkg": "",
           "install_script": "security_tools.sh",
+          "uninstall_cmd": "rm -rf /opt/metasploit-framework && rm -f /usr/local/bin/msfconsole /usr/local/bin/msfvenom",
           "builtin": false,
           "tags": ["exploit", "framework", "post-exploit"],
           "requires_reboot": false
@@ -320,6 +322,7 @@
           "check_cmd": "python3 -c 'import impacket'",
           "check_pkg": "python3-impacket",
           "install_script": "security_tools.sh",
+          "uninstall_cmd": "pip3 uninstall -y impacket 2>/dev/null; apt-get remove -y python3-impacket 2>/dev/null; true",
           "builtin": false,
           "tags": ["windows", "smb", "kerberos", "ad"],
           "requires_reboot": false
@@ -572,6 +575,7 @@
           "check_cmd": "which node-red",
           "check_pkg": "",
           "install_script": "iot_tools.sh",
+          "uninstall_cmd": "systemctl disable --now nodered 2>/dev/null; npm uninstall -g node-red 2>/dev/null; rm -f /etc/systemd/system/nodered.service; systemctl daemon-reload 2>/dev/null; true",
           "builtin": false,
           "tags": ["nodered", "automation", "iot", "visual"],
           "requires_reboot": false
@@ -584,6 +588,7 @@
           "check_cmd": "ls /opt/zigbee2mqtt",
           "check_pkg": "",
           "install_script": "iot_tools.sh",
+          "uninstall_cmd": "systemctl disable --now zigbee2mqtt 2>/dev/null; rm -rf /opt/zigbee2mqtt",
           "builtin": false,
           "tags": ["zigbee", "iot", "mqtt", "smarthome"],
           "requires_reboot": false
@@ -792,6 +797,7 @@
           "check_cmd": "which gitea",
           "check_pkg": "",
           "install_script": "dev_tools.sh",
+          "uninstall_cmd": "systemctl disable --now gitea 2>/dev/null; rm -f /usr/local/bin/gitea /etc/systemd/system/gitea.service; systemctl daemon-reload 2>/dev/null; true",
           "builtin": false,
           "tags": ["git", "server", "repositories"],
           "requires_reboot": false
@@ -936,6 +942,7 @@
           "check_cmd": "which hass",
           "check_pkg": "",
           "install_script": "dev_tools.sh",
+          "uninstall_cmd": "systemctl disable --now homeassistant 2>/dev/null; pip3 uninstall -y homeassistant 2>/dev/null; rm -f /etc/systemd/system/homeassistant.service; systemctl daemon-reload 2>/dev/null; true",
           "builtin": false,
           "tags": ["homeassistant", "smarthome", "automation", "hub"],
           "requires_reboot": false
@@ -980,6 +987,7 @@
           "check_cmd": "which k3s",
           "check_pkg": "",
           "install_script": "dev_tools.sh",
+          "uninstall_cmd": "/usr/local/bin/k3s-uninstall.sh 2>/dev/null || (systemctl disable --now k3s 2>/dev/null; rm -f /usr/local/bin/k3s; true)",
           "builtin": false,
           "tags": ["kubernetes", "k3s", "containers", "cluster"],
           "requires_reboot": false

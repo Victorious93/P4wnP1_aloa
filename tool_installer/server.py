@@ -200,11 +200,49 @@ def get_update_cmd(tool: dict) -> str:
 
     return f"echo 'No update method defined for {tool_id}'"
 
+def get_uninstall_cmd(tool: dict) -> str:
+    """Returns the shell command to remove a tool."""
+    import re
+    tool_id = tool["id"]
+
+    if tool.get("builtin"):
+        return "echo 'Built-in — cannot be uninstalled here; managed by P4wnP1 service.'"
+
+    # Catalog-provided explicit uninstall command takes priority
+    explicit = tool.get("uninstall_cmd", "")
+    if explicit:
+        return explicit
+
+    # apt packages: purge and autoremove
+    pkgs = tool.get("packages", [])
+    if pkgs:
+        pkg_list = " ".join(pkgs)
+        return f"apt-get remove -y {pkg_list} && apt-get autoremove -y"
+
+    # Infer from check_cmd:
+    check = tool.get("check_cmd", "")
+
+    # pip-installed: "python3 -c 'import foo'"
+    m = re.search(r"import\s+([\w.]+)", check)
+    if m:
+        mod = m.group(1).split(".")[0]
+        return f"pip3 uninstall -y {mod} 2>/dev/null || true"
+
+    # git-cloned to /opt/<dir>: "ls /opt/foo" or "test -d /opt/foo"
+    m = re.search(r"/opt/([\w_-]+)", check)
+    if m:
+        opt_dir = f"/opt/{m.group(1)}"
+        return (f"systemctl disable --now $(basename {opt_dir}) 2>/dev/null || true; "
+                f"rm -rf {opt_dir}")
+
+    return (f"echo 'No automated uninstall for {tool_id}. "
+            f"Check /opt/, pip list, and dpkg -l to locate installed files.'")
+
 def _run_job_sync(job_id: str, tool_ids: list, catalog: dict, action: str):
     """Runs in a thread pool — blocks on subprocess I/O, does not touch the event loop."""
     tools_map = flat_tools(catalog)
     jobs[job_id]["status"] = "running"
-    verb = "Updating" if action == "update" else "Installing"
+    verb = {"update": "Updating", "uninstall": "Removing"}.get(action, "Installing")
 
     for tool_id in tool_ids:
         tool = tools_map.get(tool_id)
@@ -216,7 +254,12 @@ def _run_job_sync(job_id: str, tool_ids: list, catalog: dict, action: str):
         jobs[job_id]["output"].append(f"{verb}: {tool['name']}\n")
         jobs[job_id]["output"].append(f"{'='*60}\n")
 
-        cmd = get_update_cmd(tool) if action == "update" else get_install_cmd(tool)
+        if action == "update":
+            cmd = get_update_cmd(tool)
+        elif action == "uninstall":
+            cmd = get_uninstall_cmd(tool)
+        else:
+            cmd = get_install_cmd(tool)
         jobs[job_id]["output"].append(f"$ {cmd}\n\n")
 
         try:
@@ -225,7 +268,7 @@ def _run_job_sync(job_id: str, tool_ids: list, catalog: dict, action: str):
         except Exception as e:
             jobs[job_id]["output"].append(f"[ERROR] {e}\n")
 
-    done_msg = "Update" if action == "update" else "Installation"
+    done_msg = {"update": "Update", "uninstall": "Removal"}.get(action, "Installation")
     jobs[job_id]["output"].append(f"\n[DONE] {done_msg} complete.\n")
     jobs[job_id]["status"] = "done"
 
@@ -241,6 +284,9 @@ class InstallRequest(BaseModel):
     tool_ids: list[str]
 
 class UpdateRequest(BaseModel):
+    tool_ids: list[str]
+
+class UninstallRequest(BaseModel):
     tool_ids: list[str]
 
 class SSHConnectRequest(BaseModel):
@@ -322,6 +368,22 @@ async def update_all_installed():
                     "action": "update"}
     _spawn_job(job_id, installed_ids, catalog, "update")
     return {"job_id": job_id, "tool_ids": installed_ids}
+
+@app.post("/api/uninstall")
+async def uninstall_tools(req: UninstallRequest):
+    if not req.tool_ids:
+        raise HTTPException(status_code=400, detail="No tool_ids provided")
+    catalog = load_catalog()
+    tools_map = flat_tools(catalog)
+    # Refuse to uninstall builtins
+    blocked = [tid for tid in req.tool_ids if tools_map.get(tid, {}).get("builtin")]
+    if blocked:
+        raise HTTPException(status_code=400, detail=f"Cannot uninstall built-in tools: {blocked}")
+    job_id = str(uuid.uuid4())
+    jobs[job_id] = {"status": "pending", "output": [], "tool_ids": req.tool_ids,
+                    "action": "uninstall"}
+    _spawn_job(job_id, req.tool_ids, catalog, "uninstall")
+    return {"job_id": job_id}
 
 @app.get("/api/jobs/{job_id}/stream")
 async def stream_job(job_id: str):
