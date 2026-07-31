@@ -169,7 +169,18 @@ button { cursor: pointer; font: inherit; }
 .update-btn { font-size: 11px; padding: 3px 10px; border-radius: 4px; border: 1px solid var(--amber); color: var(--amber); background: transparent; cursor: pointer; white-space: nowrap; transition: background 0.15s, color 0.15s; }
 .update-btn:hover { background: var(--amber); color: #000; }
 .update-btn.installing { opacity: 0.6; animation: pulse 1.2s ease infinite; cursor: default; }
+.uninstall-btn { font-size: 11px; padding: 3px 8px; border-radius: 4px; border: 1px solid transparent; color: var(--muted); background: transparent; cursor: pointer; white-space: nowrap; transition: all 0.15s; }
+.uninstall-btn:hover { border-color: var(--red); color: var(--red); }
+.uninstall-btn.installing { opacity: 0.5; animation: pulse 1.2s ease infinite; cursor: default; }
 @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:0.5} }
+
+/* Toast */
+#toast-container { position: fixed; bottom: 20px; right: 20px; z-index: 9999; display: flex; flex-direction: column; gap: 8px; pointer-events: none; }
+.toast { padding: 10px 16px; border-radius: var(--radius); font-size: 13px; font-weight: 500; max-width: 320px; opacity: 0; transform: translateY(8px); transition: opacity 0.2s, transform 0.2s; pointer-events: auto; border: 1px solid transparent; }
+.toast.show { opacity: 1; transform: translateY(0); }
+.toast.info  { background: var(--surface); border-color: var(--border); color: var(--text); }
+.toast.error { background: rgba(248,81,73,0.12); border-color: var(--red); color: var(--red); }
+.toast.success { background: rgba(63,185,80,0.12); border-color: var(--green); color: var(--green); }
 
 /* Reboot badge */
 .badge.reboot { color: var(--amber); border-color: rgba(210,153,34,0.4); background: rgba(210,153,34,0.07); }
@@ -329,6 +340,7 @@ button { cursor: pointer; font: inherit; }
         <span class="sel-count" id="sel-count">0 selected</span>
         <div class="spacer"></div>
         <button class="btn btn-sm" onclick="clearSelection()">Clear</button>
+        <button class="btn btn-sm danger" id="uninstall-selected-btn" onclick="uninstallSelected()" title="Remove selected tools">✕ Remove Selected</button>
         <button class="btn btn-sm" id="update-selected-btn" onclick="updateSelected()" title="Update selected tools">↑ Update Selected</button>
         <button class="btn primary btn-sm" id="install-selected-btn" onclick="installSelected()">
           ⬇ Install Selected
@@ -340,6 +352,8 @@ button { cursor: pointer; font: inherit; }
     </main>
   </div>
 </div>
+
+<div id="toast-container"></div>
 
 <!-- Modal -->
 <div id="modal-overlay" role="dialog" aria-modal="true">
@@ -494,6 +508,9 @@ function toolCard(t) {
   const updateBtn = (!t.builtin && t.installed)
     ? `<button class="update-btn btn-sm" id="ubtn-${t.id}" onclick="updateOne('${t.id}')" title="Update to latest version">↑ Update</button>`
     : '';
+  const uninstallBtn = (!t.builtin && t.installed)
+    ? `<button class="uninstall-btn" id="xbtn-${t.id}" onclick="uninstallOne('${t.id}')" title="Remove this tool">✕ Remove</button>`
+    : '';
 
   return `<div class="${classes}" id="card-${t.id}">
     <div class="card-top">
@@ -509,6 +526,7 @@ function toolCard(t) {
       ${tags.length ? `<div class="tags">${tags}</div>` : ''}
     </div>
     <div style="display:flex;justify-content:flex-end;gap:6px;margin-top:4px">
+      ${uninstallBtn}
       ${updateBtn}
       <button class="install-btn btn-sm" id="ibtn-${t.id}" ${installBtnDisabled} onclick="installOne('${t.id}')">${installBtnLabel}</button>
     </div>
@@ -561,6 +579,14 @@ async function updateSelected() {
   await startJob([...selectedIds], 'update');
 }
 
+async function uninstallSelected() {
+  const ids = [...selectedIds].filter(id => toolsData[id] && !toolsData[id].builtin && toolsData[id].installed);
+  if (!ids.length) { showToast('No installed (non-built-in) tools selected.', 'info'); return; }
+  const names = ids.map(id => toolsData[id].name).join(', ');
+  if (!confirm(`Remove ${ids.length} tool${ids.length > 1 ? 's' : ''}?\n\n${names}\n\nThis cannot be undone.`)) return;
+  await startJob(ids, 'uninstall');
+}
+
 async function updateAllInstalled() {
   openModal('Updating all installed tools…');
   setModalStatus('Fetching installed list…', true);
@@ -576,20 +602,29 @@ async function updateAllInstalled() {
   }
 }
 
+async function uninstallOne(toolId) {
+  const tool = toolsData[toolId];
+  if (!tool) return;
+  if (!confirm(`Remove "${tool.name}"?\n\nThis may purge apt packages and configuration. This action cannot be undone.`)) return;
+  await startJob([toolId], 'uninstall');
+}
+
 async function startJob(toolIds, action) {
-  const verb = action === 'update' ? 'Updating' : 'Installing';
+  const verb = action === 'update' ? 'Updating' : action === 'uninstall' ? 'Removing' : 'Installing';
   openModal(verb + ' ' + toolIds.length + ' tool' + (toolIds.length > 1 ? 's' : '') + '…');
   setModalStatus('Starting…', true);
 
   toolIds.forEach(id => {
-    const btn = action === 'update'
-      ? document.getElementById('ubtn-' + id)
-      : document.getElementById('ibtn-' + id);
-    if (btn) { btn.textContent = '…'; btn.classList.add('installing'); btn.disabled = true; }
+    const btnEl = action === 'uninstall'
+      ? document.getElementById('xbtn-' + id)
+      : action === 'update'
+        ? document.getElementById('ubtn-' + id)
+        : document.getElementById('ibtn-' + id);
+    if (btnEl) { btnEl.textContent = '…'; btnEl.classList.add('installing'); btnEl.disabled = true; }
   });
 
   try {
-    const endpoint = action === 'update' ? '/api/update' : '/api/install';
+    const endpoint = action === 'update' ? '/api/update' : action === 'uninstall' ? '/api/uninstall' : '/api/install';
     const r = await fetch(endpoint, {
       method: 'POST',
       headers: {'Content-Type': 'application/json'},
@@ -617,7 +652,7 @@ function streamJob(jobId, toolIds, action) {
     const data = JSON.parse(e.data);
     if (data.done) {
       sseSource.close();
-      const doneMsg = action === 'update' ? 'Update complete.' : 'Installation complete.';
+      const doneMsg = action === 'update' ? 'Update complete.' : action === 'uninstall' ? 'Removal complete.' : 'Installation complete.';
       setModalStatus(doneMsg, false);
       toolIds.forEach(id => resetBtn(id, action));
       clearSelection();
@@ -649,6 +684,11 @@ function appendTerminal(text, cls) {
 }
 
 function resetBtn(toolId, action) {
+  if (action === 'uninstall') {
+    const btn = document.getElementById('xbtn-' + toolId);
+    if (btn) { btn.classList.remove('installing'); btn.disabled = false; btn.textContent = '✕ Remove'; }
+    return;
+  }
   const btnId = action === 'update' ? 'ubtn-' : 'ibtn-';
   const btn = document.getElementById(btnId + toolId);
   if (btn) {
@@ -751,9 +791,18 @@ function applyTheme(t) {
   document.getElementById('theme-btn').textContent = t === 'dark' ? '☀ Light' : '🌙 Dark';
 }
 
-// ── Toast (minimal) ──────────────────────────────────────────────────────────
-function showToast(msg, type) {
-  console.warn('[' + (type||'info').toUpperCase() + ']', msg);
+// ── Toast ────────────────────────────────────────────────────────────────────
+function showToast(msg, type = 'info') {
+  const container = document.getElementById('toast-container');
+  const toast = document.createElement('div');
+  toast.className = `toast ${type}`;
+  toast.textContent = msg;
+  container.appendChild(toast);
+  requestAnimationFrame(() => requestAnimationFrame(() => toast.classList.add('show')));
+  setTimeout(() => {
+    toast.classList.remove('show');
+    setTimeout(() => toast.remove(), 250);
+  }, 3500);
 }
 
 // Close modal on overlay click
