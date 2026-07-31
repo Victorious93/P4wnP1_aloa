@@ -1,0 +1,109 @@
+name: Build Installers
+
+on:
+  push:
+    branches: [master]
+    paths:
+      - "tool_installer/**"
+      - ".github/workflows/build-installers.yml"
+  workflow_dispatch:
+
+jobs:
+  build-linux:
+    name: Linux AppImage
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Install dependencies
+        run: |
+          pip install pyinstaller fastapi uvicorn paramiko cryptography aiohttp
+
+      - name: Build with PyInstaller
+        working-directory: tool_installer
+        run: pyinstaller p4wnp1_installer.spec --noconfirm
+
+      - name: Package as AppImage
+        working-directory: tool_installer
+        run: |
+          mkdir -p AppDir/usr/bin AppDir/usr/share/applications AppDir/usr/share/icons/hicolor/256x256/apps
+          cp dist/P4wnP1_Installer AppDir/usr/bin/
+          cat > AppDir/usr/share/applications/p4wnp1-installer.desktop << 'EOF'
+          [Desktop Entry]
+          Name=P4wnP1 Tool Installer
+          Exec=P4wnP1_Installer
+          Icon=p4wnp1-installer
+          Type=Application
+          Categories=Network;Security;System;
+          EOF
+          # Minimal placeholder icon (1x1 PNG)
+          printf '\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR\x00\x00\x00\x01\x00\x00\x00\x01\x08\x02\x00\x00\x00\x90wS\xde\x00\x00\x00\x0cIDATx\x9cc\xf8\x0f\x00\x00\x01\x01\x00\x05\x18\xd8N\x00\x00\x00\x00IEND\xaeB`\x82' \
+            > AppDir/usr/share/icons/hicolor/256x256/apps/p4wnp1-installer.png
+          cp AppDir/usr/share/applications/p4wnp1-installer.desktop AppDir/
+          cp AppDir/usr/share/icons/hicolor/256x256/apps/p4wnp1-installer.png AppDir/
+          # Download appimagetool
+          wget -q "https://github.com/AppImage/AppImageKit/releases/download/continuous/appimagetool-x86_64.AppImage" \
+            -O appimagetool && chmod +x appimagetool
+          ARCH=x86_64 ./appimagetool AppDir dist/P4wnP1_Installer-x86_64.AppImage || true
+          # If AppImage packaging fails, the raw binary is still available
+          ls -lh dist/
+
+      - name: Upload Linux artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: P4wnP1_Installer-Linux
+          path: |
+            tool_installer/dist/P4wnP1_Installer
+            tool_installer/dist/P4wnP1_Installer-x86_64.AppImage
+          if-no-files-found: error
+          retention-days: 30
+
+  build-windows:
+    name: Windows Installer
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Install dependencies
+        run: pip install pyinstaller fastapi uvicorn paramiko cryptography aiohttp
+
+      - name: Build with PyInstaller
+        working-directory: tool_installer
+        run: pyinstaller p4wnp1_installer.spec --noconfirm
+
+      - name: Build Windows installer with Inno Setup
+        working-directory: tool_installer
+        shell: pwsh
+        run: |
+          $iscc = "C:\Program Files (x86)\Inno Setup 6\ISCC.exe"
+          if (Test-Path $iscc) {
+            & $iscc installer.iss
+          } else {
+            # Download and install Inno Setup silently
+            $url = "https://jrsoftware.org/download.php/is.exe"
+            Invoke-WebRequest -Uri $url -OutFile "$env:TEMP\is.exe"
+            Start-Process -Wait -FilePath "$env:TEMP\is.exe" -ArgumentList "/VERYSILENT /SUPPRESSMSGBOXES /NORESTART"
+            & $iscc installer.iss
+          }
+
+      - name: Upload Windows artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: P4wnP1_Installer-Windows
+          path: |
+            tool_installer/dist/P4wnP1_Installer.exe
+            tool_installer/dist/installer/P4wnP1_Installer_Setup.exe
+          if-no-files-found: warn
+          retention-days: 30

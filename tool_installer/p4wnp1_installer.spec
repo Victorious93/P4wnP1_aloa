@@ -3,22 +3,17 @@
 # PyInstaller spec for P4wnP1 Tool Installer
 #
 # Build with:
-#   pyinstaller p4wnp1_installer.spec
+#   cd tool_installer && pyinstaller p4wnp1_installer.spec
 #
-# Output: dist/P4wnP1_Installer[.exe]
+# Output: tool_installer/dist/P4wnP1_Installer   (Linux/macOS)
+#         tool_installer/dist/P4wnP1_Installer.exe (Windows)
 
-import sys
-from pathlib import Path
-
-block_cipher = None
-
-# Data files to bundle (source, dest-dir-inside-bundle)
 added_files = [
-    ("server.py",                 "."),
-    ("static",                    "static"),
-    ("tools",                     "tools"),
-    ("install_scripts",           "install_scripts"),
-    ("requirements.txt",          "."),
+    ("server.py",       "."),
+    ("static",          "static"),
+    ("tools",           "tools"),
+    ("install_scripts", "install_scripts"),
+    ("requirements.txt", "."),
 ]
 
 a = Analysis(
@@ -56,13 +51,10 @@ a = Analysis(
     hooksconfig={},
     runtime_hooks=[],
     excludes=["matplotlib", "numpy", "PIL", "scipy", "pandas"],
-    win_no_prefer_redirects=False,
-    win_private_assemblies=False,
-    cipher=block_cipher,
     noarchive=False,
 )
 
-pyz = PYZ(a.pure, a.zipped_data, cipher=block_cipher)
+pyz = PYZ(a.pure)
 
 exe = EXE(
     pyz,
@@ -78,11 +70,10 @@ exe = EXE(
     upx=True,
     upx_exclude=[],
     runtime_tmpdir=None,
-    console=False,          # no terminal window on Windows
+    console=False,
     disable_windowed_traceback=False,
     argv_emulation=False,
     target_arch=None,
     codesign_identity=None,
     entitlements_file=None,
-    # icon="static/favicon.ico",   # uncomment if favicon.ico is present
 )
