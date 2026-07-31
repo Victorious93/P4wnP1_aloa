@@ -15,6 +15,7 @@ import sys
 import time
 import uuid
 import webbrowser
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from typing import Optional
 
@@ -39,6 +40,7 @@ config: dict = {}
 ssh_client: Optional[paramiko.SSHClient] = None
 jobs: dict[str, dict] = {}  # job_id → {status, output, tool_ids}
 log = logging.getLogger("installer")
+_executor = ThreadPoolExecutor(max_workers=4)
 
 # ── Catalog ───────────────────────────────────────────────────────────────────
 
@@ -198,8 +200,8 @@ def get_update_cmd(tool: dict) -> str:
 
     return f"echo 'No update method defined for {tool_id}'"
 
-async def _run_job(job_id: str, tool_ids: list[str], catalog: dict, action: str):
-    """Background task: run install or update for each tool, stream output."""
+def _run_job_sync(job_id: str, tool_ids: list, catalog: dict, action: str):
+    """Runs in a thread pool — blocks on subprocess I/O, does not touch the event loop."""
     tools_map = flat_tools(catalog)
     jobs[job_id]["status"] = "running"
     verb = "Updating" if action == "update" else "Installing"
@@ -227,11 +229,11 @@ async def _run_job(job_id: str, tool_ids: list[str], catalog: dict, action: str)
     jobs[job_id]["output"].append(f"\n[DONE] {done_msg} complete.\n")
     jobs[job_id]["status"] = "done"
 
-async def run_install_job(job_id: str, tool_ids: list[str], catalog: dict):
-    await _run_job(job_id, tool_ids, catalog, "install")
 
-async def run_update_job(job_id: str, tool_ids: list[str], catalog: dict):
-    await _run_job(job_id, tool_ids, catalog, "update")
+def _spawn_job(job_id: str, tool_ids: list, catalog: dict, action: str):
+    """Submit a job to the thread pool from an async endpoint."""
+    loop = asyncio.get_event_loop()
+    loop.run_in_executor(_executor, _run_job_sync, job_id, tool_ids, catalog, action)
 
 # ── API Models ────────────────────────────────────────────────────────────────
 
@@ -290,9 +292,7 @@ async def install_tools(req: InstallRequest):
     catalog = load_catalog()
     jobs[job_id] = {"status": "pending", "output": [], "tool_ids": req.tool_ids,
                     "action": "install"}
-    asyncio.get_event_loop().run_in_executor(
-        None, lambda: asyncio.run(run_install_job(job_id, req.tool_ids, catalog))
-    )
+    _spawn_job(job_id, req.tool_ids, catalog, "install")
     return {"job_id": job_id}
 
 @app.post("/api/update")
@@ -303,9 +303,7 @@ async def update_tools(req: UpdateRequest):
     catalog = load_catalog()
     jobs[job_id] = {"status": "pending", "output": [], "tool_ids": req.tool_ids,
                     "action": "update"}
-    asyncio.get_event_loop().run_in_executor(
-        None, lambda: asyncio.run(run_update_job(job_id, req.tool_ids, catalog))
-    )
+    _spawn_job(job_id, req.tool_ids, catalog, "update")
     return {"job_id": job_id}
 
 @app.post("/api/update-all")
@@ -322,9 +320,7 @@ async def update_all_installed():
     job_id = str(uuid.uuid4())
     jobs[job_id] = {"status": "pending", "output": [], "tool_ids": installed_ids,
                     "action": "update"}
-    asyncio.get_event_loop().run_in_executor(
-        None, lambda: asyncio.run(run_update_job(job_id, installed_ids, catalog))
-    )
+    _spawn_job(job_id, installed_ids, catalog, "update")
     return {"job_id": job_id, "tool_ids": installed_ids}
 
 @app.get("/api/jobs/{job_id}/stream")
@@ -333,18 +329,17 @@ async def stream_job(job_id: str):
     if job_id not in jobs:
         raise HTTPException(status_code=404, detail="Job not found")
 
-    def event_generator():
+    async def event_generator():
         sent = 0
         while True:
             output = jobs[job_id]["output"]
             while sent < len(output):
-                line = output[sent].replace("\n", "\\n")
                 yield f"data: {json.dumps({'line': output[sent]})}\n\n"
                 sent += 1
             if jobs[job_id]["status"] == "done":
                 yield f"data: {json.dumps({'done': True})}\n\n"
                 break
-            time.sleep(0.1)
+            await asyncio.sleep(0.1)
 
     return StreamingResponse(event_generator(), media_type="text/event-stream",
                              headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
