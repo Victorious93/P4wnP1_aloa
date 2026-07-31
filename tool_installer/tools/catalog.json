@@ -25,7 +25,7 @@
           "name": "DuckyScript Sample Library",
           "description": "Extended library of DuckyScript payloads for Windows, Linux, and macOS. Includes helpers for PowerShell, bash injection, and mouse automation.",
           "packages": [],
-          "check_cmd": "ls /usr/local/P4wnP1/HIDScripts/helper.js",
+          "check_cmd": "ls /usr/local/P4wnP1/HIDScripts/windows_powershell_admin.js",
           "check_pkg": "",
           "install_script": "hid_tools.sh",
           "builtin": false,

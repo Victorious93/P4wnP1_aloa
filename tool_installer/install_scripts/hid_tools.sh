@@ -3,6 +3,7 @@
 set -euo pipefail
 export DEBIAN_FRONTEND=noninteractive
 TOOL_ID="${1:-}"
+UPDATE_MODE="${2:-}"
 
 install_duckyscript_samples() {
   echo "[hid] Installing extended DuckyScript samples..."
@@ -58,6 +59,13 @@ DUCK
 }
 
 install_usb_image_tools() {
+  if [ "$UPDATE_MODE" = "update" ]; then
+    echo "[hid] Updating USB mass storage image tools..."
+    apt-get update -qq && apt-get install -y --only-upgrade --no-install-recommends \
+      genisoimage dosfstools util-linux 2>/dev/null || true
+    echo "[hid] USB image tools updated."
+    return
+  fi
   echo "[hid] Installing USB mass storage image tools..."
   apt-get install -y --no-install-recommends \
     genisoimage dosfstools util-linux

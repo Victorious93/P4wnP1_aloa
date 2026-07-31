@@ -3,8 +3,16 @@
 set -euo pipefail
 export DEBIAN_FRONTEND=noninteractive
 TOOL_ID="${1:-}"
+UPDATE_MODE="${2:-}"
 
 install_mpd() {
+  if [ "$UPDATE_MODE" = "update" ]; then
+    echo "[media] Updating MPD..."
+    apt-get update -qq && apt-get install -y --only-upgrade --no-install-recommends mpd ncmpc mpc 2>/dev/null || true
+    systemctl restart mpd 2>/dev/null || true
+    echo "[media] MPD updated."
+    return
+  fi
   echo "[media] Installing MPD + ncmpc + mpc..."
   apt-get install -y --no-install-recommends mpd ncmpc mpc
   systemctl enable mpd
@@ -12,12 +20,25 @@ install_mpd() {
 }
 
 install_ffmpeg() {
+  if [ "$UPDATE_MODE" = "update" ]; then
+    echo "[media] Updating ffmpeg..."
+    apt-get update -qq && apt-get install -y --only-upgrade --no-install-recommends ffmpeg 2>/dev/null || true
+    echo "[media] ffmpeg updated."
+    return
+  fi
   echo "[media] Installing ffmpeg..."
   apt-get install -y --no-install-recommends ffmpeg
   echo "[media] ffmpeg installed."
 }
 
 install_icecast2() {
+  if [ "$UPDATE_MODE" = "update" ]; then
+    echo "[media] Updating Icecast2..."
+    apt-get update -qq && apt-get install -y --only-upgrade --no-install-recommends icecast2 2>/dev/null || true
+    systemctl restart icecast2 2>/dev/null || true
+    echo "[media] Icecast2 updated."
+    return
+  fi
   echo "[media] Installing Icecast2..."
   echo "icecast2 icecast2/icecast-setup boolean false" | debconf-set-selections
   apt-get install -y --no-install-recommends icecast2
@@ -31,6 +52,14 @@ install_retroarch() {
 }
 
 install_jellyfin() {
+  if [ "$UPDATE_MODE" = "update" ] && dpkg -l jellyfin &>/dev/null; then
+    echo "[media] Updating Jellyfin..."
+    apt-get update -qq 2>/dev/null || true
+    apt-get install -y --only-upgrade --no-install-recommends jellyfin 2>/dev/null || true
+    systemctl restart jellyfin 2>/dev/null || true
+    echo "[media] Jellyfin updated."
+    return
+  fi
   echo "[media] Installing Jellyfin..."
   apt-get install -y --no-install-recommends apt-transport-https gnupg
   curl -fsSL https://repo.jellyfin.org/packages/jellyfin_team.gpg.key | gpg --dearmor -o /etc/apt/keyrings/jellyfin.gpg 2>/dev/null || true
