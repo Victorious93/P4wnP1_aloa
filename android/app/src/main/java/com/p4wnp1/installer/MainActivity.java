@@ -56,7 +56,7 @@ public class MainActivity extends Activity {
 
         errorText = new TextView(this);
         errorText.setTextSize(16f);
-        errorText.setText("Could not connect to P4wnP1 Tool Installer.\n\n"
+        errorText.setText("Could not connect to BakerPi Tool Installer.\n\n"
                 + "Make sure:\n"
                 + "• Pi Zero is plugged in via USB\n"
                 + "• USB tethering is enabled on your phone\n"

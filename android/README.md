@@ -1,6 +1,6 @@
-# P4wnP1 Tool Installer — Android App
+# BakerPi Tool Installer — Android App
 
-A minimal Android WebView wrapper that loads the P4wnP1 Tool Installer web UI
+A minimal Android WebView wrapper that loads the BakerPi Tool Installer web UI
 served by the Pi Zero over USB OTG.
 
 ## How it works
@@ -37,6 +37,15 @@ Or install directly while connected via USB cable:
 ./gradlew installDebug
 ```
 
+## PWA Alternative (no build required)
+
+You don't need the APK. Open Chrome on Android and navigate to:
+```
+http://172.16.0.1:8080
+```
+Tap the browser menu → **Add to Home Screen** — the installer installs as a
+home-screen PWA icon. The web UI is fully mobile-responsive and works in any browser.
+
 ## Changing the target IP
 
 If your Pi Zero uses a different IP (e.g., `192.168.7.1` for CDC-ECM on some
@@ -54,11 +63,3 @@ private static final String DEFAULT_URL = "http://YOUR_PI_IP:8080";
 | Blank white screen | Wait ~10s for Pi to assign IP; reload |
 | Page loads but tools don't install | Tool installer needs root on Pi; check service is running |
 | App crashes immediately | Check Android version is 5.0+ |
-
-## Running without the app
-
-You don't need the APK — just open Chrome on Android and navigate to:
-```
-http://172.16.0.1:8080
-```
-The web UI is fully mobile-responsive and works in any browser.
